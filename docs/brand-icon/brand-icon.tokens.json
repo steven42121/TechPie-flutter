@@ -14,7 +14,7 @@
       }
     },
     "appIcon": {
-      "$description": "Review proposal for the Apple app icon, from the faceted P at branch revision 9ac9844.",
+      "$description": "TechPie launcher icon based on the faceted P at revision 9ac9844.",
       "canvas": {
         "width": {
           "$type": "dimension",
@@ -56,10 +56,10 @@
         "offsetY": {
           "$type": "dimension",
           "$value": {
-            "value": 24,
+            "value": 8,
             "unit": "px"
           },
-          "$description": "Positive is down, relative to canvas center. Compensates for the visual weight of the upper triangle faces."
+          "$description": "Positive is down from the canvas center. A small downward offset compensates for the broader upper facets while keeping the top and bottom margins close."
         },
         "convexCornerInsetPerTriangleSide": {
           "$type": "number",

@@ -13,7 +13,11 @@ This document is the single visual source of truth for **TechPie-flutter** acros
 
 ### Brand Icon
 
-The [brand tokens](brand-icon/brand-icon.tokens.json) preserve the in-app mark proportions and record the Apple app icon proposal. The [P artwork](brand-icon/01-TechPie-P.svg) is a single foreground layer for Icon Composer. Its nominal height is 672 px on a 1024 px canvas, close to the existing icon's proportions and large enough to retain the triangular counter at small sizes. The vertical gradient is centered on TechRed. The system supplies the outer mask and highlights. The Apple app icon proposal was previewed on the official template and still needs an Icon Composer render.
+The [brand tokens](brand-icon/brand-icon.tokens.json) define the faceted P and its vertical TechRed gradient. The [P artwork](brand-icon/01-TechPie-P.svg) has a nominal height of 672 px on a 1024 px canvas. This preserves the triangular cutout at small sizes and leaves room for system masks. The legacy desktop bitmap uses an 824 px colored tile with 100 px of transparent space on each side. Its 184 px corner radius follows the proportions of the legacy macOS icon grid. The current Apple assets use static bitmaps. The same SVG is available as a foreground layer for Icon Composer.
+
+The P sits 8 px below the canvas center. Comparing the desktop icon at 128, 48, and 24 px favored a smaller downward offset. It reduces the visible margin difference while allowing for the broader upper facets.
+
+To regenerate the launcher artwork on macOS with Pillow installed, run `python3 scripts/render-brand-icon.py` followed by `dart run flutter_launcher_icons`. Android uses separate gradient, foreground, and monochrome layers for its adaptive icon.
 
 ### Spacing (4 dp grid) & Density Presets
 
