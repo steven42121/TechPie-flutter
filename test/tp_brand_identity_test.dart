@@ -6,6 +6,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:techpie/models/assignment.dart';
+import 'package:techpie/models/course.dart';
+import 'package:techpie/models/custom_course.dart';
 import 'package:techpie/pages/home_page.dart';
 import 'package:techpie/services/assignment_service.dart';
 import 'package:techpie/services/auth_service.dart';
@@ -52,9 +54,24 @@ class _AssignmentsWithFixture extends AssignmentService {
   final List<Assignment> visibleAssignments;
 }
 
+class _ScheduleWithFixture extends ScheduleService {
+  _ScheduleWithFixture(
+    super.storage,
+    super.http,
+    super.auth,
+    super.tpAuth,
+    this.customCourses,
+  );
+
+  @override
+  final List<CustomCourse> customCourses;
+}
+
 Future<Widget> _buildHomeHost({
   required Widget child,
   List<Assignment>? visibleAssignments,
+  List<CustomCourse> customCourses = const [],
+  bool dark = false,
 }) async {
   SharedPreferences.setMockInitialValues({'privacy_accepted_v1': true});
   final prefs = await SharedPreferences.getInstance();
@@ -67,7 +84,7 @@ Future<Widget> _buildHomeHost({
       : _SignedInAuth(storage, http, uniAuth);
   final tpAuth = ThirdPartyAuthService(storage, http);
   final themeService = ThemeService(storage);
-  final schedule = ScheduleService(storage, http, auth, tpAuth);
+  final schedule = _ScheduleWithFixture(storage, http, auth, tpAuth, customCourses);
   final assignments = visibleAssignments == null
       ? AssignmentService(storage, http, auth, tpAuth, schedule)
       : _AssignmentsWithFixture(
@@ -101,7 +118,7 @@ Future<Widget> _buildHomeHost({
     campusCardService: campusCard,
     ecardBindService: EcardBindService(),
     child: MaterialApp(
-      theme: themeService.lightTheme,
+      theme: dark ? themeService.darkTheme : themeService.lightTheme,
       home: child,
     ),
   );
@@ -152,42 +169,144 @@ void main() {
     expect(contrast, greaterThanOrEqualTo(3));
   });
 
-  testWidgets('Home labels a long late-submission window as needing attention', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-    try {
-      tester.view.physicalSize = const Size(420, 840);
+  testWidgets(
+    'narrow Home shows the next course and adapts deadlines to widget size',
+    (tester) async {
+      tester.view.physicalSize = const Size(680, 1000);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final now = DateTime.now();
-
+      final nextDay = DateTime(now.year, now.month, now.day + 1);
+      Assignment pending(String title, Duration offset) => Assignment(
+            id: title,
+            platform: 'Blackboard',
+            title: title,
+            course: 'Calculus',
+            due: now.add(offset),
+          );
       await tester.pumpWidget(
         await _buildHomeHost(
           child: const HomePage(),
+          dark: true,
           visibleAssignments: [
+            pending('HW3', const Duration(hours: 8)),
+            pending('Project 3', const Duration(days: 2)),
+            pending('HW4', const Duration(days: 8)),
             Assignment(
-              id: 'long-late-window',
+              id: 'late-window',
               platform: 'Gradescope',
-              title: 'Homework',
+              title: 'Late homework',
               course: 'Calculus',
               due: now.subtract(const Duration(hours: 1)),
-              lateDue: now.add(const Duration(days: 2)),
+              lateDue: now.add(const Duration(days: 9)),
+            ),
+          ],
+          customCourses: [
+            CustomCourse(
+              id: 'next-course',
+              name: 'Computer Networks',
+              location: 'Room 201',
+              time: const ClockCourseTime(startTime: '10:00', endTime: '11:40'),
+              date: nextDay,
             ),
           ],
         ),
       );
       await tester.pumpAndSettle();
-      final glance = find.byKey(const ValueKey('home.deadlines-glance'));
+
+      final courses = find.byKey(const ValueKey('home.today-courses'));
       expect(
-        find.descendant(of: glance, matching: find.text('1 项需关注')),
+        find.descendant(of: courses, matching: find.text('Computer Networks')),
         findsOneWidget,
       );
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-    }
-  });
+      expect(find.textContaining('10:00'), findsOneWidget);
+      expect(find.textContaining('Room 201'), findsOneWidget);
+      expect(find.text('Deadlines'), findsOneWidget);
+      expect(find.text('查看全部 · 另有 1 项（1 项需关注）'), findsOneWidget);
+
+      Iterable<TpProgressRow> deadlineRows() =>
+          tester.widgetList<TpProgressRow>(find.byType(TpProgressRow));
+      expect(deadlineRows().map((row) => row.title), ['HW3', 'Project 3', 'HW4']);
+      expect(deadlineRows().map((row) => row.color), [
+        TpTokens.dangerDark,
+        TpTokens.warningAmberDark,
+        TpTokens.iosBlueDark,
+      ]);
+      for (final row in deadlineRows()) {
+        final context = tester.element(find.byWidget(row));
+        final track = context.tpColors.surfaceSubtle.computeLuminance();
+        final fill = row.color.computeLuminance();
+        expect((fill + 0.05) / (track + 0.05), greaterThanOrEqualTo(3));
+      }
+      final urgent = deadlineRows().first;
+      final label = find.descendant(
+        of: find.byWidget(urgent),
+        matching: find.text(urgent.trailingLabel),
+      );
+      final labelText = tester.widget<Text>(label);
+      final badge = find.ancestor(of: label, matching: find.byType(Container));
+      final tint =
+          (tester.widget<Container>(badge.first).decoration! as BoxDecoration)
+              .color!;
+      final card = tester.element(label).tpColors.surface;
+      final badgeBackground = Color.alphaBlend(tint, card).computeLuminance();
+      final foreground = labelText.style!.color!.computeLuminance();
+      expect((foreground + 0.05) / (badgeBackground + 0.05), greaterThanOrEqualTo(4.5));
+
+      await tester.tap(find.byKey(const ValueKey('home.edit-toggle')));
+      await tester.pumpAndSettle();
+      final sizeMenu = find.byKey(const ValueKey('home.widget-size-deadlines'));
+      Future<void> selectSize(String size) async {
+        await tester.ensureVisible(sizeMenu);
+        await tester.tap(sizeMenu);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey('home.widget-size-deadlines-$size')));
+        await tester.pumpAndSettle();
+      }
+
+      await selectSize('small');
+      expect(deadlineRows().map((row) => row.title), ['HW3']);
+      expect(find.text('查看全部 · 另有 3 项（1 项需关注）'), findsOneWidget);
+
+      await selectSize('large');
+      final late = deadlineRows().singleWhere((row) => row.title == 'Late homework');
+      expect(deadlineRows(), hasLength(4));
+      expect(late.color, TpTokens.dangerDark);
+      expect(late.trailingLabel, contains('迟交剩余'));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'a long deadline countdown fits a narrow card with large text',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(textScaler: TextScaler.linear(2)),
+            child: Center(
+              child: SizedBox(
+                width: 240,
+                child: TpProgressRow(
+                  title: 'Data structures project',
+                  trailingLabel: '迟交剩余 2 天 23 小时',
+                  progress: 1,
+                  color: TpTokens.techRedLight,
+                  highlightTrailing: true,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final title = find.text('Data structures project');
+      final countdown = find.text('迟交剩余 2 天 23 小时');
+      expect(tester.getTopLeft(countdown).dy, greaterThan(tester.getBottomLeft(title).dy));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'TpBrandMark renders pure-vector CustomPaint without Image across Light, Dark, and AMOLED themes',

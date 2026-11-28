@@ -6,7 +6,7 @@ import '../../theme/tp_typography.dart';
 import 'tp_tap_surface.dart';
 
 /// Deadline/task row featuring title, urgency countdown, optional subtitle,
-/// and a thin rounded progress indicator bar.
+/// and a rounded progress indicator bar.
 class TpProgressRow extends StatelessWidget {
   const TpProgressRow({
     super.key,
@@ -39,28 +39,32 @@ class TpProgressRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.tpColors;
-    final clamped = progress.clamp(0.05, 1.0);
     final resolvedTrailingColor = trailingColor ?? color;
+    final textScale = MediaQuery.textScalerOf(context).scale(12) / 12;
     final Widget trailing = highlightTrailing
         ? Container(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
             decoration: BoxDecoration(
               color: resolvedTrailingColor.withValues(
-                alpha: colors.isDark ? 0.16 : 0.10,
+                alpha: colors.isDark ? 0.08 : 0.10,
               ),
               borderRadius: BorderRadius.circular(TpTokens.radiusPill),
             ),
             child: Text(
               trailingLabel,
               style: TpTypography.badge(resolvedTrailingColor),
-              maxLines: 1,
             ),
           )
         : Text(
             trailingLabel,
             style: TpTypography.badge(resolvedTrailingColor),
-            maxLines: 1,
           );
+    final titleText = Text(
+      title,
+      style: TpTypography.itemTitle(colors),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
 
     final body = Padding(
       padding: padding,
@@ -68,19 +72,26 @@ class TpProgressRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: TpTypography.itemTitle(colors),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: TpTokens.space2),
-              trailing,
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 250 * textScale) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    titleText,
+                    const SizedBox(height: TpTokens.space1),
+                    trailing,
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: titleText),
+                  const SizedBox(width: TpTokens.space2),
+                  trailing,
+                ],
+              );
+            },
           ),
           if (subtitle != null && subtitle!.isNotEmpty) ...[
             const SizedBox(height: 3),
@@ -92,7 +103,11 @@ class TpProgressRow extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 7),
-          TpProgressBar(progress: clamped, color: color),
+          TpProgressBar(
+            progress: progress,
+            color: color,
+            height: TpTokens.progressBarHeight,
+          ),
         ],
       ),
     );

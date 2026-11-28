@@ -11,6 +11,7 @@ import '../models/assignment_overrides.dart';
 import '../services/assignment_service.dart';
 import '../services/deadline_reminder_service.dart';
 import '../services/service_provider.dart';
+import '../theme/deadline_urgency.dart';
 import '../theme/theme.dart';
 import '../utils/adaptive_layout.dart';
 import '../utils/adaptive_motion.dart';
@@ -1585,25 +1586,6 @@ String _formatOverdueLabel(DateTime due, DateTime now) {
   return '已逾期';
 }
 
-double _urgencyProgress({
-  required DateTime due,
-  required DateTime now,
-  required bool completed,
-  required bool isPast,
-  required bool isLateWindow,
-}) {
-  if (completed || isPast || isLateWindow) return 1.0;
-  final hoursLeft = due.difference(now).inMinutes / 60.0;
-  if (hoursLeft <= 0) return 1.0;
-  if (hoursLeft <= 24) {
-    return (0.98 - (hoursLeft / 24.0) * 0.13).clamp(0.85, 0.98);
-  }
-  if (hoursLeft <= 7 * 24) {
-    return (0.85 - ((hoursLeft - 24.0) / (6 * 24.0)) * 0.60).clamp(0.25, 0.85);
-  }
-  return 0.15;
-}
-
 class _AssignmentRow extends StatefulWidget {
   final Assignment assignment;
   final bool completed;
@@ -1654,12 +1636,13 @@ class _AssignmentRowState extends State<_AssignmentRow> {
         !isPast;
 
     final displayDue = isLateWindow ? lateDue : assignment.due;
-    final hoursLeft = displayDue.difference(now).inHours;
-    final isCalm = !completed &&
-        !isPast &&
-        !isLateWindow &&
-        !isExamInProgress &&
-        hoursLeft >= 72;
+    final remaining = displayDue.difference(now);
+    final needsAttention = isPast || isLateWindow || isExamInProgress;
+    final urgency = DeadlineUrgency.fromRemaining(
+      remaining,
+      needsAttention: needsAttention,
+    );
+    final isCalm = !completed && urgency == DeadlineUrgency.scheduled;
     final dueShort = DateFormat('MM/dd HH:mm').format(displayDue);
 
     final subtitle = switch (assignment) {
@@ -1675,24 +1658,9 @@ class _AssignmentRowState extends State<_AssignmentRow> {
       _ => '',
     };
 
-    final Color urgencyColor = () {
-      if (completed) return colors.successGreen;
-      if (isPast || isLateWindow || isExamInProgress) return colors.dangerRed;
-      if (hoursLeft < 24) return colors.dangerRed;
-      if (hoursLeft < 72) return colors.warningAmber;
-      return colors.textPrimary.withValues(alpha: colors.isDark ? 0.30 : 0.28);
-    }();
-    final Color countdownColor = isCalm ? colors.textMuted : urgencyColor;
-
-    final progress = isExamInProgress
-        ? 1.0
-        : _urgencyProgress(
-            due: displayDue,
-            now: now,
-            completed: completed,
-            isPast: isPast,
-            isLateWindow: isLateWindow,
-          );
+    final urgencyColor = completed ? colors.successGreen : urgency.color(colors);
+    final countdownColor = isCalm ? colors.textMuted : urgencyColor;
+    final progress = completed || needsAttention ? 1.0 : deadlineUrgencyProgress(remaining);
 
     final completedStatusLabel = (completed && assignment is! CustomDeadline)
         ? (assignment.status == 'Graded' ? 'Graded' : 'Submitted')
@@ -2029,6 +1997,7 @@ class _AssignmentRowState extends State<_AssignmentRow> {
                         color: completed
                             ? urgencyColor.withValues(alpha: 0.45)
                             : urgencyColor,
+                        height: TpTokens.progressBarHeight,
                       ),
                     ],
                   ),

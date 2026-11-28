@@ -154,6 +154,47 @@ void main() {
     });
   });
 
+  group('Home widget sizes', () {
+    test('preserves old layouts and selects sizes independently per viewport', () async {
+      SharedPreferences.setMockInitialValues({
+        'home_mobile_layout_v1': '{"v":1,"order":["deadlines"],"campusCardStyle":"full"}',
+      });
+      final storage = StorageService(await SharedPreferences.getInstance());
+      final existing = storage.homeMobileLayout;
+      expect(existing.order, [HomeWidgetId.deadlines]);
+      expect(existing.campusCardStyle, HomeCampusCardStyle.full);
+      expect(existing.sizeOf(HomeWidgetId.deadlines), HomeWidgetSize.medium);
+
+      final mobile = existing.withWidgetSize(HomeWidgetId.deadlines, HomeWidgetSize.small);
+      await storage.setHomeMobileLayout(mobile);
+      final desktop = storage.homeDesktopLayout.withWidgetSize(
+        HomeWidgetId.todayCourses,
+        HomeWidgetSize.small,
+      );
+      await storage.setHomeDesktopLayout(desktop);
+
+      expect(storage.homeMobileLayout, mobile);
+      expect(storage.homeDesktopLayout, desktop);
+      expect(storage.homeDesktopLayout.sizeOf(HomeWidgetId.deadlines), HomeWidgetSize.medium);
+      expect(
+        mobile
+            .removeWidget(HomeWidgetId.deadlines)
+            .addWidget(HomeWidgetId.deadlines)
+            .sizeOf(HomeWidgetId.deadlines),
+        HomeWidgetSize.small,
+      );
+    });
+
+    test('invalid size settings never discard an existing layout', () {
+      final layout = HomeMobileLayout.decode(
+        '{"v":1,"order":["deadlines","campus_ecourse"],"widgetSizes":{"deadlines":"unknown","campus_ecourse":"large","removed_widget":"small"}}',
+      );
+      expect(layout.order, [HomeWidgetId.deadlines, HomeWidgetId.campusEcourse]);
+      expect(layout.sizeOf(HomeWidgetId.deadlines), HomeWidgetSize.medium);
+      expect(layout.sizeOf(HomeWidgetId.campusEcourse), HomeWidgetSize.medium);
+    });
+  });
+
   group('StorageService Home layout persistence', () {
     test('persists mobile and desktop layouts independently', () async {
       SharedPreferences.setMockInitialValues({});

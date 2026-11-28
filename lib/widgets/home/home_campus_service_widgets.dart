@@ -41,25 +41,48 @@ Widget buildCampusServiceHomeWidget(
   BuildContext context,
   HomeWidgetId id, {
   List<Course> todayCourses = const [],
+  HomeWidgetSize size = HomeWidgetSize.medium,
 }) =>
-    switch (id) {
-      HomeWidgetId.campusGrades => const _GradesHomeWidget(),
-      HomeWidgetId.campusStudyPlan => const _StudyPlanHomeWidget(),
-      HomeWidgetId.campusBlackboard => const _BlackboardHomeWidget(),
-      HomeWidgetId.campusElrcRecordings =>
-        _ElrcRecordingsHomeWidget(todayCourses: todayCourses),
-      HomeWidgetId.campusEcourse => const _EcourseHomeWidget(),
-      HomeWidgetId.campusCourseCatalog => const _CourseCatalogHomeWidget(),
-      HomeWidgetId.campusCertificates => const _CertificatesHomeWidget(),
-      HomeWidgetId.campusOaGym => const _OaGymHomeWidget(),
-      HomeWidgetId.campusStudentLeave => const _StudentLeaveHomeWidget(),
-      HomeWidgetId.campusHolidayTravel => const _HolidayTravelHomeWidget(),
-      HomeWidgetId.campusActivities => const _ActivitiesHomeWidget(),
-      HomeWidgetId.campusJobs => const _JobsHomeWidget(),
-      HomeWidgetId.campusStudentAllowance => const _StudentAllowanceHomeWidget(),
-      HomeWidgetId.campusPnpMinor => const _PnpMinorHomeWidget(),
-      _ => const SizedBox.shrink(),
-    };
+    _CampusWidgetSize(
+      size: size,
+      child: switch (id) {
+        HomeWidgetId.campusGrades => const _GradesHomeWidget(),
+        HomeWidgetId.campusStudyPlan => const _StudyPlanHomeWidget(),
+        HomeWidgetId.campusBlackboard => const _BlackboardHomeWidget(),
+        HomeWidgetId.campusElrcRecordings =>
+          _ElrcRecordingsHomeWidget(todayCourses: todayCourses),
+        HomeWidgetId.campusEcourse => const _EcourseHomeWidget(),
+        HomeWidgetId.campusCourseCatalog => const _CourseCatalogHomeWidget(),
+        HomeWidgetId.campusCertificates => const _CertificatesHomeWidget(),
+        HomeWidgetId.campusOaGym => const _OaGymHomeWidget(),
+        HomeWidgetId.campusStudentLeave => const _StudentLeaveHomeWidget(),
+        HomeWidgetId.campusHolidayTravel => const _HolidayTravelHomeWidget(),
+        HomeWidgetId.campusActivities => const _ActivitiesHomeWidget(),
+        HomeWidgetId.campusJobs => const _JobsHomeWidget(),
+        HomeWidgetId.campusStudentAllowance => const _StudentAllowanceHomeWidget(),
+        HomeWidgetId.campusPnpMinor => const _PnpMinorHomeWidget(),
+        _ => const SizedBox.shrink(),
+      },
+    );
+
+class _CampusWidgetSize extends InheritedWidget {
+  const _CampusWidgetSize({required this.size, required super.child});
+
+  final HomeWidgetSize size;
+
+  static HomeWidgetSize of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_CampusWidgetSize>()?.size ??
+      HomeWidgetSize.medium;
+
+  static int previewLimit(BuildContext context, int standard) => switch (of(context)) {
+        HomeWidgetSize.small => 1,
+        HomeWidgetSize.medium => standard,
+        HomeWidgetSize.large => standard + 2,
+      };
+
+  @override
+  bool updateShouldNotify(_CampusWidgetSize oldWidget) => size != oldWidget.size;
+}
 
 Feature? _findFeatureById(String featureId) {
   for (final feature in featureEntries) {
@@ -346,7 +369,7 @@ class _GradesHomeWidgetState extends State<_GradesHomeWidget> {
             ? allCourses
             : (ready ? service.courses(GradeScope.major) : const <CourseGrade>[]);
         final summary = courses.isEmpty ? null : GradeSummary.of(courses);
-        final preview = courses.take(2).toList();
+        final preview = courses.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusGrades,
@@ -468,7 +491,8 @@ class _StudyPlanHomeWidgetState extends State<_StudyPlanHomeWidget> {
             ? (service.cached(full: false) ?? service.cached(full: true))
             : null;
         final pct = snapshot?.completionPercent;
-        final categories = snapshot?.categories.take(3).toList() ?? const [];
+        final categories =
+            snapshot?.categories.take(_CampusWidgetSize.previewLimit(context, 3)).toList() ?? const [];
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusStudyPlan,
@@ -598,7 +622,7 @@ class _BlackboardHomeWidgetState extends State<_BlackboardHomeWidget> {
         final topTerm = courses.isNotEmpty && courses.first.term.isNotEmpty
             ? courses.first.term
             : null;
-        final preview = courses.take(3).toList();
+        final preview = courses.take(_CampusWidgetSize.previewLimit(context, 3)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusBlackboard,
@@ -683,7 +707,7 @@ class _ElrcRecordingsHomeWidget extends StatelessWidget {
       builder: (context, _) {
         final ready =
             sp.authService.isLoggedIn && sp.thirdPartyAuthService.hasIdsBinding;
-        final preview = todayCourses.take(2).toList();
+        final preview = todayCourses.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
         return _CampusServiceCard(
           id: HomeWidgetId.campusElrcRecordings,
           badge: TpBadge(
@@ -739,7 +763,9 @@ class _EcourseHomeWidget extends StatelessWidget {
           child: _CompactPromptBody(
             icon: TpIcons.classroom,
             title: ready ? '打开 E 云课堂' : '绑定 IDS 后可免密进入',
-            subtitle: '自动注入登录态浏览课程资源与回放',
+            subtitle: _CampusWidgetSize.of(context) == HomeWidgetSize.small
+                ? null
+                : '进入后可浏览课程资源与回放',
           ),
         );
       },
@@ -763,7 +789,7 @@ class _CourseCatalogHomeWidget extends StatelessWidget {
       builder: (context, _) {
         final ready = service != null && service.owner != null;
         final history = ready ? service.history : const <String>[];
-        final recent = history.take(4).toList();
+        final recent = history.take(_CampusWidgetSize.previewLimit(context, 4)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusCourseCatalog,
@@ -876,7 +902,7 @@ class _CertificatesHomeWidgetState extends State<_CertificatesHomeWidget> {
               for (final record in service.records[kind] ?? const [])
                 (kind, record),
         ];
-        final preview = items.take(2).toList();
+        final preview = items.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusCertificates,
@@ -961,19 +987,25 @@ class _OaGymHomeWidget extends StatelessWidget {
                   spacing: TpTokens.space2,
                   runSpacing: TpTokens.space2,
                   children: [
-                    for (final sport in OaSport.values)
+                    for (final sport in OaSport.values.take(
+                      _CampusWidgetSize.of(context) == HomeWidgetSize.small
+                          ? 2
+                          : OaSport.values.length,
+                    ))
                       TpBadge(label: sport.label, tone: TpBadgeTone.muted),
                   ],
                 ),
-                const SizedBox(height: TpTokens.space2),
-                Text(
-                  gym.timeSlots.isNotEmpty
-                      ? '已加载 ${gym.timeSlots.length} 个预约时段 · 点击查询空闲场地'
-                      : '查询各项目空闲时段并预约或取消场地',
-                  style: TpTypography.itemMeta(context.tpColors),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                if (_CampusWidgetSize.of(context) == HomeWidgetSize.large) ...[
+                  const SizedBox(height: TpTokens.space2),
+                  Text(
+                    gym.timeSlots.isNotEmpty
+                        ? '已加载 ${gym.timeSlots.length} 个预约时段 · 点击查询空闲场地'
+                        : '查询各项目空闲时段并预约或取消场地',
+                    style: TpTypography.itemMeta(context.tpColors),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ],
             ),
           ),
@@ -1036,7 +1068,7 @@ class _StudentLeaveHomeWidgetState extends State<_StudentLeaveHomeWidget> {
       builder: (context, _) {
         final ready = service != null && service.ready;
         final history = ready ? service.history : const <StudentLeave>[];
-        final preview = history.take(2).toList();
+        final preview = history.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusStudentLeave,
@@ -1135,7 +1167,7 @@ class _HolidayTravelHomeWidgetState extends State<_HolidayTravelHomeWidget> {
       builder: (context, _) {
         final ready = service != null && service.ready;
         final history = ready ? service.history : const <HolidayTravel>[];
-        final preview = history.take(2).toList();
+        final preview = history.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusHolidayTravel,
@@ -1247,7 +1279,7 @@ class _ActivitiesHomeWidgetState extends State<_ActivitiesHomeWidget> {
         _syncIdentity(sp);
         final ready =
             sp.authService.isLoggedIn && sp.thirdPartyAuthService.hasIdsBinding;
-        final preview = _records.take(2).toList();
+        final preview = _records.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusActivities,
@@ -1380,7 +1412,7 @@ class _JobsHomeWidgetState extends State<_JobsHomeWidget> {
             sp.thirdPartyAuthService.hasIdsBinding &&
             studentId.isNotEmpty;
         final combined = [..._teachingAssistant, ..._workStudy];
-        final preview = combined.take(2).toList();
+        final preview = combined.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusJobs,
@@ -1501,10 +1533,17 @@ class _StudentAllowanceHomeWidgetState
         _syncRevision(service);
         final ready = service.access == StudentAllowanceAccess.ready;
         final totalFen = _report?.total?.netFen;
-        final latestMonth =
-            (_report != null && _report!.months.isNotEmpty)
-                ? _report!.months.last
-                : null;
+        final size = _CampusWidgetSize.of(context);
+        final months = _report?.months
+                .take(
+                  switch (size) {
+                    HomeWidgetSize.small => 0,
+                    HomeWidgetSize.medium => 1,
+                    HomeWidgetSize.large => 3,
+                  },
+                )
+                .toList() ??
+            const [];
 
         return _CampusServiceCard(
           id: HomeWidgetId.campusStudentAllowance,
@@ -1539,18 +1578,19 @@ class _StudentAllowanceHomeWidgetState
                           label: _formatFen(totalFen),
                           tone: TpBadgeTone.success,
                         ),
-                        showDivider: latestMonth != null,
+                        showDivider: months.isNotEmpty,
                       ),
-                      if (latestMonth != null)
+                      for (var i = 0; i < months.length; i++)
                         TpListRow(
-                          title: latestMonth.month == null
-                              ? '最近月份'
-                              : '${latestMonth.month!.year}-${latestMonth.month!.month.toString().padLeft(2, '0')}',
-                          subtitle: '${latestMonth.categories.length} 个补助项目',
+                          title: months[i].month == null
+                              ? '发放月份'
+                              : '${months[i].month!.year}-${months[i].month!.month.toString().padLeft(2, '0')}',
+                          subtitle: '${months[i].categories.length} 个补助项目',
                           trailing: TpBadge(
-                            label: _formatFen(latestMonth.netFen),
+                            label: _formatFen(months[i].netFen),
                             tone: TpBadgeTone.info,
                           ),
+                          showDivider: i < months.length - 1,
                         ),
                     ],
                   ),
@@ -1610,7 +1650,7 @@ class _PnpMinorHomeWidgetState extends State<_PnpMinorHomeWidget> {
         final rows = ready
             ? service.sections.values.expand((e) => e).toList()
             : const <AcademicApplicationRow>[];
-        final preview = rows.take(2).toList();
+        final preview = rows.take(_CampusWidgetSize.previewLimit(context, 2)).toList();
         final anyOpen = pnpWin == ApplicationWindow.open ||
             minorWin == ApplicationWindow.open;
 

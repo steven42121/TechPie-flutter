@@ -41,6 +41,15 @@ enum HomeWidgetId {
   /// Stable serialized identifier stored in [SharedPreferences].
   final String key;
 
+  List<HomeWidgetSize> get sizes => switch (this) {
+        campusCard => const [],
+        campusEcourse => const [HomeWidgetSize.small, HomeWidgetSize.medium],
+        _ => HomeWidgetSize.values,
+      };
+
+  HomeWidgetSize get defaultSize =>
+      this == quickActions ? HomeWidgetSize.large : HomeWidgetSize.medium;
+
   static HomeWidgetId? fromKey(Object? raw) {
     if (raw is! String) return null;
     for (final value in values) {
@@ -49,6 +58,34 @@ enum HomeWidgetId {
     return null;
   }
 }
+
+/// Controls how much information a Home widget displays in its column.
+enum HomeWidgetSize {
+  small('小号'),
+  medium('中号'),
+  large('大号');
+
+  const HomeWidgetSize(this.label);
+
+  final String label;
+}
+
+Map<HomeWidgetId, HomeWidgetSize> _parseWidgetSizes(Object? value) {
+  if (value is! Map) return const {};
+  return {
+    for (final id in HomeWidgetId.values)
+      for (final size in id.sizes)
+        if (value[id.key] == size.name) id: size,
+  };
+}
+
+Map<HomeWidgetId, HomeWidgetSize> _customWidgetSizes(
+  Map<HomeWidgetId, HomeWidgetSize> sizes,
+) =>
+    Map.unmodifiable({
+      for (final MapEntry(:key, :value) in sizes.entries)
+        if (key.sizes.contains(value) && value != key.defaultSize) key: value,
+    });
 
 /// Visual density style for the Home campus card widget.
 enum HomeCampusCardStyle {
@@ -282,7 +319,9 @@ class HomeMobileLayout {
   HomeMobileLayout({
     required List<HomeWidgetId> order,
     this.campusCardStyle = defaultCampusCardStyle,
-  }) : order = List<HomeWidgetId>.unmodifiable(_dedupe(order));
+    Map<HomeWidgetId, HomeWidgetSize> widgetSizes = const {},
+  })  : order = List<HomeWidgetId>.unmodifiable(_dedupe(order)),
+        widgetSizes = _customWidgetSizes(widgetSizes);
 
   factory HomeMobileLayout.defaults() => HomeMobileLayout(
         order: defaultOrder,
@@ -301,6 +340,12 @@ class HomeMobileLayout {
 
   final List<HomeWidgetId> order;
   final HomeCampusCardStyle campusCardStyle;
+  final Map<HomeWidgetId, HomeWidgetSize> widgetSizes;
+
+  HomeWidgetSize sizeOf(HomeWidgetId id) => widgetSizes[id] ?? id.defaultSize;
+
+  HomeMobileLayout withWidgetSize(HomeWidgetId id, HomeWidgetSize size) =>
+      copyWith(widgetSizes: {...widgetSizes, id: size});
 
   bool get isEmpty => order.isEmpty;
 
@@ -314,10 +359,12 @@ class HomeMobileLayout {
   HomeMobileLayout copyWith({
     List<HomeWidgetId>? order,
     HomeCampusCardStyle? campusCardStyle,
+    Map<HomeWidgetId, HomeWidgetSize>? widgetSizes,
   }) =>
       HomeMobileLayout(
         order: order ?? this.order,
         campusCardStyle: campusCardStyle ?? this.campusCardStyle,
+        widgetSizes: widgetSizes ?? this.widgetSizes,
       );
 
   /// Reorders using Flutter's [ReorderableListView] index convention
@@ -369,6 +416,10 @@ class HomeMobileLayout {
         'v': 1,
         'order': [for (final id in order) id.key],
         'campusCardStyle': campusCardStyle.key,
+        if (widgetSizes.isNotEmpty)
+          'widgetSizes': {
+            for (final MapEntry(:key, :value) in widgetSizes.entries) key.key: value.name,
+          },
       };
 
   String encode() => jsonEncode(toJson());
@@ -390,7 +441,11 @@ class HomeMobileLayout {
         decoded['campusCardStyle'],
         fallback: defaultCampusCardStyle,
       );
-      return HomeMobileLayout(order: order, campusCardStyle: style);
+      return HomeMobileLayout(
+        order: order,
+        campusCardStyle: style,
+        widgetSizes: _parseWidgetSizes(decoded['widgetSizes']),
+      );
     } catch (_) {
       return HomeMobileLayout.defaults();
     }
@@ -408,10 +463,17 @@ class HomeMobileLayout {
   bool operator ==(Object other) =>
       other is HomeMobileLayout &&
       other.campusCardStyle == campusCardStyle &&
+      mapEquals(other.widgetSizes, widgetSizes) &&
       listEquals(other.order, order);
 
   @override
-  int get hashCode => Object.hash(campusCardStyle, Object.hashAll(order));
+  int get hashCode => Object.hash(
+        campusCardStyle,
+        Object.hashAll(order),
+        Object.hashAllUnordered(
+          widgetSizes.entries.map((entry) => Object.hash(entry.key, entry.value)),
+        ),
+      );
 }
 
 /// Dual-column Bento widget arrangement and preferences for wide/desktop views.
@@ -421,12 +483,14 @@ class HomeDesktopLayout {
     required this.primary,
     required this.secondary,
     required this.campusCardStyle,
+    required this.widgetSizes,
   });
 
   factory HomeDesktopLayout({
     required List<HomeWidgetId> primary,
     required List<HomeWidgetId> secondary,
     HomeCampusCardStyle campusCardStyle = defaultCampusCardStyle,
+    Map<HomeWidgetId, HomeWidgetSize> widgetSizes = const {},
   }) {
     final seen = <HomeWidgetId>{};
     final cleanPrimary = <HomeWidgetId>[
@@ -441,6 +505,7 @@ class HomeDesktopLayout {
       primary: List<HomeWidgetId>.unmodifiable(cleanPrimary),
       secondary: List<HomeWidgetId>.unmodifiable(cleanSecondary),
       campusCardStyle: campusCardStyle,
+      widgetSizes: _customWidgetSizes(widgetSizes),
     );
   }
 
@@ -466,6 +531,12 @@ class HomeDesktopLayout {
   final List<HomeWidgetId> primary;
   final List<HomeWidgetId> secondary;
   final HomeCampusCardStyle campusCardStyle;
+  final Map<HomeWidgetId, HomeWidgetSize> widgetSizes;
+
+  HomeWidgetSize sizeOf(HomeWidgetId id) => widgetSizes[id] ?? id.defaultSize;
+
+  HomeDesktopLayout withWidgetSize(HomeWidgetId id, HomeWidgetSize size) =>
+      copyWith(widgetSizes: {...widgetSizes, id: size});
 
   bool get isEmpty => primary.isEmpty && secondary.isEmpty;
 
@@ -498,11 +569,13 @@ class HomeDesktopLayout {
     List<HomeWidgetId>? primary,
     List<HomeWidgetId>? secondary,
     HomeCampusCardStyle? campusCardStyle,
+    Map<HomeWidgetId, HomeWidgetSize>? widgetSizes,
   }) =>
       HomeDesktopLayout(
         primary: primary ?? this.primary,
         secondary: secondary ?? this.secondary,
         campusCardStyle: campusCardStyle ?? this.campusCardStyle,
+        widgetSizes: widgetSizes ?? this.widgetSizes,
       );
 
   /// Moves [id] to drop slot [slotIndex] in [targetColumn].
@@ -601,6 +674,10 @@ class HomeDesktopLayout {
         'primary': [for (final id in primary) id.key],
         'secondary': [for (final id in secondary) id.key],
         'campusCardStyle': campusCardStyle.key,
+        if (widgetSizes.isNotEmpty)
+          'widgetSizes': {
+            for (final MapEntry(:key, :value) in widgetSizes.entries) key.key: value.name,
+          },
       };
 
   String encode() => jsonEncode(toJson());
@@ -631,6 +708,7 @@ class HomeDesktopLayout {
         primary: primary,
         secondary: secondary,
         campusCardStyle: style,
+        widgetSizes: _parseWidgetSizes(decoded['widgetSizes']),
       );
     } catch (_) {
       return HomeDesktopLayout.defaults();
@@ -641,6 +719,7 @@ class HomeDesktopLayout {
   bool operator ==(Object other) =>
       other is HomeDesktopLayout &&
       other.campusCardStyle == campusCardStyle &&
+      mapEquals(other.widgetSizes, widgetSizes) &&
       listEquals(other.primary, primary) &&
       listEquals(other.secondary, secondary);
 
@@ -649,5 +728,8 @@ class HomeDesktopLayout {
         campusCardStyle,
         Object.hashAll(primary),
         Object.hashAll(secondary),
+        Object.hashAllUnordered(
+          widgetSizes.entries.map((entry) => Object.hash(entry.key, entry.value)),
+        ),
       );
 }

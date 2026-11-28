@@ -9,9 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../features/campus_card/app/app_providers.dart';
 import '../models/assignment.dart';
 import '../models/course.dart';
-import '../models/course_table.dart';
 import '../models/custom_course.dart';
-import '../models/exam_course.dart';
 import '../models/feature.dart';
 import '../models/home_layout.dart';
 import '../services/assignment_service.dart';
@@ -21,10 +19,12 @@ import '../services/schedule_service.dart';
 import '../services/service_provider.dart';
 import '../services/storage_service.dart';
 import '../services/third_party_auth_service.dart';
+import '../theme/deadline_urgency.dart';
 import '../theme/theme.dart';
 import '../utils/adaptive_layout.dart';
 import '../utils/adaptive_motion.dart';
 import '../utils/haptics.dart';
+import '../utils/today_courses.dart';
 import '../utils/user_display_name.dart';
 import '../widgets/adaptive_button.dart';
 import '../widgets/adaptive_feedback.dart';
@@ -62,7 +62,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late ThirdPartyAuthService _tpAuth;
   late CampusCardService _campusCard;
   List<Course> _todayCourses = [];
-  List<Period> _periods = defaultPeriods.toList();
+  ({DateTime date, List<Course> courses})? _nextCourseDay;
   bool _initialized = false;
   bool _animationsEnabled = true;
 
@@ -228,6 +228,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() => _desktopLayout = next);
     _syncGalleryNotifier(true);
     unawaited(_storage.setHomeDesktopLayout(next));
+  }
+
+  void _setWidgetSize(
+    HomeWidgetId id,
+    HomeWidgetSize size, {
+    required bool isBento,
+  }) {
+    if (isBento) {
+      _updateDesktopLayout(_desktopLayout.withWidgetSize(id, size));
+    } else {
+      _updateMobileLayout(_mobileLayout.withWidgetSize(id, size));
+    }
   }
 
   void _onMobileReorderStart(int index) {
@@ -442,53 +454,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _doRebuild() {
-    final table = _schedule.fullCourseTable;
-    if (table != null && table.periods.isNotEmpty) {
-      _periods = table.periods.map((p) => p.toPeriod()).toList();
-    }
-    final termBegin = _schedule.termBegin;
     final now = _now;
-    final week = _resolvedWeek(now);
-    final timetableCourses = table?.courses ?? const <EamsCourse>[];
-    final withCustom = withCustomCourses(
-      eamsToDisplayCourses(
-        timetableCourses,
-        week,
-        timetablePeriods: _periods,
-        onDate: now,
-      ),
-      _schedule.customCourses,
-      week,
-      termBegin,
-      periods: _periods,
-      onDate: now,
-    );
-    final all = withExamCourses(
-      withCustom,
-      examsForSemester(_assignments.assignments, _schedule.selectedSemesterId),
-      week,
-      termBegin,
-      periods: _periods,
-    );
-    final newCourses = all
-        .where(
-          (course) => course.dayOfWeek == now.weekday && course.occursOn(now),
-        )
-        .toList()
-      ..sort((a, b) {
-        final startA = parseClockMinutes(a.startTime) ?? 0;
-        final startB = parseClockMinutes(b.startTime) ?? 0;
-        return startA.compareTo(startB);
-      });
+    final newCourses = coursesOnDay(_schedule, _assignments, now);
+    final nextCourseDay = newCourses.isEmpty ? _findNextCourseDay(now) : null;
 
     final previousCount = _todayCourses.length;
     setState(() {
       _todayCourses = newCourses;
+      _nextCourseDay = nextCourseDay;
     });
 
     if (previousCount == 0 && newCourses.isNotEmpty) {
       _runStaggerAnimation(newCourses.length);
     }
+  }
+
+  ({DateTime date, List<Course> courses})? _findNextCourseDay(DateTime now) {
+    // Cover alternating teaching weeks while keeping this preview bounded.
+    for (var offset = 1; offset <= 14; offset++) {
+      final date = DateUtils.addDaysToDate(now, offset);
+      final courses = coursesOnDay(_schedule, _assignments, date);
+      if (courses.isNotEmpty) return (date: date, courses: courses);
+    }
+    return null;
   }
 
   void _runStaggerAnimation(int count) {
@@ -745,11 +733,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ? _desktopLayout.campusCardStyle
         : _mobileLayout.campusCardStyle;
 
-    final showMobileGlanceRow = !isBento &&
-        !_isEditing &&
-        auth.isLoggedIn &&
-        _todayCourses.isEmpty &&
-        _mobileLayout.order.contains(HomeWidgetId.deadlines);
+    HomeWidgetSize sizeOf(HomeWidgetId id) =>
+        isBento ? _desktopLayout.sizeOf(id) : _mobileLayout.sizeOf(id);
 
     Widget buildWidgetCard(HomeWidgetId id) => switch (id) {
           HomeWidgetId.campusCard => _buildCampusCardStrip(
@@ -757,15 +742,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               storage,
               expandedCard: effectiveCardStyle == HomeCampusCardStyle.full,
             ),
-          HomeWidgetId.todayCourses => showMobileGlanceRow
-              ? _buildMobileGlanceRow(colors)
-              : _buildTodayClasses(colors, auth.isLoggedIn),
-          HomeWidgetId.deadlines => _buildPendingAssignments(colors),
-          HomeWidgetId.quickActions => _buildQuickActions(),
+          HomeWidgetId.todayCourses =>
+              _buildTodayClasses(colors, auth.isLoggedIn, sizeOf(id)),
+          HomeWidgetId.deadlines => _buildPendingAssignments(colors, sizeOf(id)),
+          HomeWidgetId.quickActions => _buildQuickActions(sizeOf(id)),
           _ => buildCampusServiceHomeWidget(
               context,
               id,
               todayCourses: _todayCourses,
+              size: sizeOf(id),
             ),
         };
 
@@ -892,6 +877,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               onEnterEditMode: () => _enterEditMode(true),
                               onCampusCardStyleChanged: (style) =>
                                   _setCampusCardStyle(style, isBento: true),
+                              onWidgetSizeChanged: (id, size) =>
+                                  _setWidgetSize(id, size, isBento: true),
                               onConfigureQuickActions: () =>
                                   _openQuickActionsEditor(storage),
                               footerWidget: debugPanel,
@@ -938,6 +925,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     style,
                                     isBento: false,
                                   ),
+                                  widgetSize: sizeOf(id),
+                                  onSizeChanged: (size) =>
+                                      _setWidgetSize(id, size, isBento: false),
                                   onConfigureQuickActions:
                                       id == HomeWidgetId.quickActions
                                           ? () =>
@@ -1015,15 +1005,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildQuickActions() {
+  Widget _buildQuickActions(HomeWidgetSize size) {
     final storage = ServiceProvider.of(context).storageService;
     return TpCard(
       key: const ValueKey('home.quick-actions'),
       title: '快捷功能',
       child: AppCard(
         features: [...homeQuickFeatures(storage.pinnedQuickFeatureIds), moreFeature],
-        rows: 2,
-        columns: 3,
+        rows: size == HomeWidgetSize.small ? 1 : 2,
+        columns: size == HomeWidgetSize.medium ? 2 : 3,
         onFeatureTap: (feature) async {
           if (feature != moreFeature) {
             await openCampusFeature(context, feature);
@@ -1035,7 +1025,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildTodayClasses(TpColors colors, bool isLoggedIn) {
+  Widget _buildTodayClasses(
+    TpColors colors,
+    bool isLoggedIn,
+    HomeWidgetSize size,
+  ) {
     final String trailingText;
     Widget content;
     if (!isLoggedIn) {
@@ -1056,20 +1050,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           setState(() {});
         },
       );
-    } else if (_todayCourses.isEmpty) {
-      trailingText = '0 节';
+    } else if (_todayCourses.isEmpty && _nextCourseDay == null) {
+      trailingText = '今日无课';
       content = _buildCompactEmpty(
         key: ValueKey('no-courses-${_now.weekday}'),
         colors: colors,
         icon: TpIcons.sun,
         title: '今天没有课程',
-        subtitle: '享受你的自由时间吧',
+        subtitle: '近期没有已同步的后续课程',
       );
     } else {
-      trailingText = '${_todayCourses.length} 节';
+      final upcoming = _todayCourses.isEmpty ? _nextCourseDay : null;
+      trailingText = upcoming == null ? '${_todayCourses.length} 节' : '今日无课';
       content = _buildCourseContent(
-        key: ValueKey('courses-${_now.weekday}'),
-        colors: colors,
+        colors,
+        date: upcoming?.date ?? _now,
+        courses: upcoming?.courses ?? _todayCourses,
+        isToday: upcoming == null,
+        size: size,
       );
     }
 
@@ -1096,49 +1094,103 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildCourseContent({required Key key, required TpColors colors}) {
-    final hasStagger = _staggerController != null &&
-        _itemSlides.length == _todayCourses.length;
+  Widget _buildCourseContent(
+    TpColors colors, {
+    required DateTime date,
+    required List<Course> courses,
+    required bool isToday,
+    required HomeWidgetSize size,
+  }) {
+    final limit = switch (size) {
+      HomeWidgetSize.small => 1,
+      HomeWidgetSize.medium => 3,
+      HomeWidgetSize.large => courses.length,
+    };
+    var start = 0;
+    if (isToday && courses.length > limit) {
+      final next = courses.indexWhere(
+        (course) => _courseStatus(course) != _CourseStatus.past,
+      );
+      start = next < 0 ? courses.length - limit : next;
+    }
+    final end = math.min(start + limit, courses.length);
+    final hasStagger =
+        isToday && _staggerController != null && _itemSlides.length == courses.length;
 
     return Padding(
-      key: key,
+      key: ValueKey('courses-${date.year}-${date.month}-${date.day}'),
       padding: const EdgeInsets.only(bottom: TpTokens.space1),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (var i = 0; i < _todayCourses.length; i++)
+          if (!isToday)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: TpTokens.cardPaddingHorizontal,
+                vertical: TpTokens.space1,
+              ),
+              child: Text(
+                '下一次上课 · ${date.month}月${date.day}日 星期${_dayLabels[date.weekday - 1]}',
+                style: TpTypography.itemMeta(colors),
+              ),
+            ),
+          for (var i = start; i < end; i++)
             if (hasStagger)
               AnimatedBuilder(
                 animation: _staggerController!,
-                builder: (context, child) {
-                  return Transform.translate(
+                builder: (context, child) => Transform.translate(
                     offset: Offset(0, _itemSlides[i].value),
                     child: Opacity(opacity: _itemFades[i].value, child: child),
-                  );
-                },
-                child: _buildCourseItem(colors, _todayCourses[i], i),
+                ),
+                child: _buildCourseItem(
+                  colors,
+                  courses[i],
+                  isToday: isToday,
+                  showTeacher: size == HomeWidgetSize.large,
+                  showDivider: i < end - 1,
+                ),
               )
             else
-              _buildCourseItem(colors, _todayCourses[i], i),
+              _buildCourseItem(
+                colors,
+                courses[i],
+                isToday: isToday,
+                showTeacher: size == HomeWidgetSize.large,
+                showDivider: i < end - 1,
+              ),
+          if (end - start < courses.length)
+            _buildCardFooter(
+              colors,
+              '查看课表',
+              () => appShellPendingTab.value = 1,
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildCourseItem(TpColors colors, Course course, int index) {
-    final status = _courseStatus(course);
+  Widget _buildCourseItem(
+    TpColors colors,
+    Course course, {
+    required bool isToday,
+    required bool showTeacher,
+    required bool showDivider,
+  }) {
+    final status = isToday ? _courseStatus(course) : _CourseStatus.upcoming;
     final isActive = status == _CourseStatus.ongoing;
     final isSoon = status == _CourseStatus.soon;
     final isPast = status == _CourseStatus.past;
 
     final isExam = course.source is ExamCourseSource;
-    final barColor = isExam
-        ? colors.dangerRed
-        : course.color.accentColor(colors.brightness);
+    final barColor = isExam ? colors.dangerRed : course.color.accentColor(colors.brightness);
 
-    final subtitle = course.location.isNotEmpty
-        ? '${course.timeLabel} · ${course.location}'
-        : course.timeLabel;
+    final teachers = course.teachers?.trim() ?? '';
+    final subtitle = [
+      course.timeLabel,
+      if (course.location.isNotEmpty) course.location,
+      if (showTeacher && teachers.isNotEmpty) teachers,
+    ].join(' · ');
 
     Widget? trailing;
     if (isActive) {
@@ -1156,7 +1208,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       trailing: trailing,
       boldTitle: isActive,
       opacity: isPast ? 0.45 : 1.0,
-      showDivider: index < _todayCourses.length - 1,
+      showDivider: showDivider,
       onTap: () => appShellPendingTab.value = 1,
     );
   }
@@ -1178,114 +1230,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ..sort((a, b) => _activeDueOf(a, now).compareTo(_activeDueOf(b, now)));
   }
 
-  Widget _buildMobileGlanceRow(TpColors colors) {
-    final now = _now;
-    final pending = _activePendingAssignments(now);
-    final urgentCount = pending.where((a) {
-      final isExamInProgress = a is ExamAssignment && a.isInProgressAt(now);
-      final inLateWindow = a.effectiveLateDue != null && a.due.isBefore(now);
-      final due = inLateWindow ? a.effectiveLateDue! : a.due;
-      return isExamInProgress ||
-          inLateWindow ||
-          due.difference(now).inHours < 24;
-    }).length;
-
-    final String statusText;
-    if (urgentCount > 0) {
-      statusText = '$urgentCount 项需关注';
-    } else if (pending.isEmpty) {
-      statusText = '全部完成';
-    } else {
-      final nearest = _dueLabel(_activeDueOf(pending.first, now), now)
-          .replaceFirst('剩余 ', '');
-      statusText = '最近 $nearest';
-    }
-
-    final metaStyle = TpTypography.cardMeta(colors);
-    final unitStyle = metaStyle.copyWith(color: colors.textSecondary);
-    final countStyle = TpTypography.numericDisplay(colors).copyWith(fontSize: 24);
-
-    final todayTile = TpCard(
-      onTap: () => appShellPendingTab.value = 1,
-      padding: const EdgeInsets.all(TpTokens.space4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('今日课程', style: metaStyle, maxLines: 1),
-          const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text('0', style: countStyle),
-              const SizedBox(width: 3),
-              Text('节', style: unitStyle),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '休息日',
-            style: metaStyle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-
-    final deadlinesTile = TpCard(
-      key: const ValueKey('home.deadlines-glance'),
-      onTap: () => appShellPendingDeadlines.value = true,
-      padding: const EdgeInsets.all(TpTokens.space4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('Deadlines', style: metaStyle, maxLines: 1),
-          const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text('${pending.length}', style: countStyle),
-              const SizedBox(width: 3),
-              Text('项', style: unitStyle),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            statusText,
-            style: metaStyle.copyWith(
-              color: urgentCount > 0 ? colors.dangerRed : colors.textMuted,
-              fontWeight: urgentCount > 0 ? FontWeight.w600 : FontWeight.w500,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-
-    return IntrinsicHeight(
-      key: const ValueKey('home.today-courses'),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: todayTile),
-          const SizedBox(width: TpTokens.sectionGap),
-          Expanded(child: deadlinesTile),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPendingAssignments(TpColors colors) {
+  Widget _buildPendingAssignments(TpColors colors, HomeWidgetSize size) {
     final now = _now;
     final pending = _activePendingAssignments(now);
 
-    final showCount = pending.length.clamp(0, 4);
+    final limit = switch (size) {
+      HomeWidgetSize.small => 1,
+      HomeWidgetSize.medium => 3,
+      HomeWidgetSize.large => 6,
+    };
+    final showCount = math.min(pending.length, limit);
     final overflow = pending.length - showCount;
+    final urgentOverflow = pending.skip(showCount).where((assignment) {
+      final remaining = _activeDueOf(assignment, now).difference(now);
+      return DeadlineUrgency.fromRemaining(
+            remaining,
+            needsAttention: assignment.due.isBefore(now),
+          ) ==
+          DeadlineUrgency.urgent;
+    }).length;
+    final overflowLabel = urgentOverflow == 0
+        ? '另有 $overflow 项'
+        : '另有 $overflow 项（$urgentOverflow 项需关注）';
 
     final String trailingText =
         pending.isEmpty ? '0 项' : '${pending.length} 项待完成';
@@ -1315,41 +1281,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 showDivider: i < showCount - 1,
               ),
             if (overflow > 0)
-              InkWell(
-                onTap: () => appShellPendingDeadlines.value = true,
-                hoverColor: colors.textPrimary.withValues(
-                  alpha: colors.isDark ? 0.06 : 0.04,
-                ),
-                splashColor: colors.brandSoft,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    TpTokens.cardPaddingHorizontal,
-                    TpTokens.space2,
-                    TpTokens.cardPaddingHorizontal,
-                    TpTokens.space3,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '还有 $overflow 项 · 前往 Deadlines 查看全部',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TpTypography.cardMeta(colors).copyWith(
-                            color: colors.brandInk,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(
-                        TpIcons.chevronRight,
-                        size: TpTokens.iconXs,
-                        color: colors.brandInk,
-                      ),
-                    ],
-                  ),
-                ),
+              _buildCardFooter(
+                colors,
+                '查看全部 · $overflowLabel',
+                () => appShellPendingDeadlines.value = true,
               ),
           ],
         ),
@@ -1379,6 +1314,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildCardFooter(TpColors colors, String label, VoidCallback onTap) {
+    return TpTapSurface(
+      style: TpTapFeedbackStyle.row,
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TpTypography.cardMeta(colors).copyWith(color: colors.brandInk),
+              ),
+            ),
+            const SizedBox(width: TpTokens.space1),
+            Icon(TpIcons.chevronRight, size: TpTokens.iconXs, color: colors.brandInk),
+          ],
+        ),
+      ),
+    );
+  }
+
   static String _formatPlatformLabel(String raw) => switch (raw.toLowerCase()) {
         'blackboard' => 'Blackboard',
         'gradescope' => 'Gradescope',
@@ -1396,20 +1355,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final isExamInProgress = a is ExamAssignment && a.isInProgressAt(now);
     final inLateWindow = a.effectiveLateDue != null && a.due.isBefore(now);
     final activeDue = inLateWindow ? a.effectiveLateDue! : a.due;
-    final visuals = _dueVisuals(
-      activeDue,
-      now,
-      colors,
-      forceUrgent: isExamInProgress || inLateWindow,
+    final remaining = activeDue.difference(now);
+    final needsAttention = isExamInProgress || inLateWindow;
+    final urgency = DeadlineUrgency.fromRemaining(
+      remaining,
+      needsAttention: needsAttention,
     );
+    final barColor = urgency.color(colors);
     final dueLabel = isExamInProgress
         ? '考试中'
-        : (inLateWindow
-            ? '迟交${_dueLabel(activeDue, now)}'
-            : _dueLabel(activeDue, now));
-    final progress = (isExamInProgress || inLateWindow)
-        ? 1.0
-        : _urgencyProgress(activeDue, now);
+        : (inLateWindow ? '迟交${_dueLabel(activeDue, now)}' : _dueLabel(activeDue, now));
+    final progress = needsAttention ? 1.0 : deadlineUrgencyProgress(remaining);
     final detail = switch (a) {
       ExamAssignment(:final location) => location.trim(),
       CustomDeadline(:final course, :final location) => [
@@ -1427,9 +1383,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       subtitle: detail,
       trailingLabel: dueLabel,
       progress: progress,
-      color: visuals.barColor,
-      trailingColor: visuals.trailingColor,
-      highlightTrailing: visuals.highlightTrailing,
+      color: barColor,
+      trailingColor: urgency == DeadlineUrgency.scheduled ? colors.textMuted : barColor,
+      highlightTrailing: urgency == DeadlineUrgency.urgent,
       showDivider: showDivider,
       onTap: () => unawaited(
         a is CustomDeadline
@@ -1437,14 +1393,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             : _openAssignmentUrl(a),
       ),
     );
-  }
-
-  static double _urgencyProgress(DateTime due, DateTime now) {
-    final hoursLeft = due.difference(now).inMinutes / 60.0;
-    if (hoursLeft <= 0) return 1.0;
-    // Maps a 7-day horizon (168h) onto [0.15, 0.95] so nearer deadlines fill
-    // further across the bar.
-    return (1.0 - hoursLeft / 168.0).clamp(0.15, 0.95);
   }
 
   static String _dueLabel(DateTime due, DateTime now) {
@@ -1461,36 +1409,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (diff.inHours >= 1) return '剩余 ${diff.inHours} 小时';
     final minutes = diff.inMinutes;
     if (minutes >= 1) return '剩余 $minutes 分钟';
-    return '< 1 分钟';
-  }
-
-  static ({Color barColor, Color trailingColor, bool highlightTrailing})
-      _dueVisuals(
-    DateTime due,
-    DateTime now,
-    TpColors colors, {
-    bool forceUrgent = false,
-  }) {
-    final diff = due.difference(now);
-    if (forceUrgent || diff.inHours < 24) {
-      return (
-        barColor: colors.dangerRed,
-        trailingColor: colors.dangerRed,
-        highlightTrailing: true,
-      );
-    }
-    if (diff.inDays < 3) {
-      return (
-        barColor: colors.warningAmber,
-        trailingColor: colors.warningAmber,
-        highlightTrailing: false,
-      );
-    }
-    return (
-      barColor: colors.textPrimary.withValues(alpha: colors.isDark ? 0.30 : 0.28),
-      trailingColor: colors.textMuted,
-      highlightTrailing: false,
-    );
+    return '剩余不到 1 分钟';
   }
 
   Future<void> _openAssignmentUrl(Assignment a) async {

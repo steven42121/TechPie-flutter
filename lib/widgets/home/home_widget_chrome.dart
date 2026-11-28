@@ -116,6 +116,8 @@ class HomeEditableCardFrame extends StatefulWidget {
     this.column,
     this.campusCardStyle,
     this.onCampusCardStyleChanged,
+    this.widgetSize,
+    this.onSizeChanged,
     this.onConfigureQuickActions,
     this.onEnterEditMode,
     this.onMoveUp,
@@ -134,6 +136,8 @@ class HomeEditableCardFrame extends StatefulWidget {
   final HomeBentoColumn? column;
   final HomeCampusCardStyle? campusCardStyle;
   final ValueChanged<HomeCampusCardStyle>? onCampusCardStyleChanged;
+  final HomeWidgetSize? widgetSize;
+  final ValueChanged<HomeWidgetSize>? onSizeChanged;
   final VoidCallback? onConfigureQuickActions;
   final VoidCallback? onEnterEditMode;
   final VoidCallback? onMoveUp;
@@ -361,6 +365,8 @@ class _HomeEditableCardFrameState extends State<HomeEditableCardFrame> {
               canMoveDown: canMoveDown,
               campusCardStyle: widget.campusCardStyle,
               onCampusCardStyleChanged: widget.onCampusCardStyleChanged,
+              widgetSize: widget.widgetSize,
+              onSizeChanged: widget.onSizeChanged,
               onConfigureQuickActions: widget.onConfigureQuickActions,
               onMoveUp: widget.onMoveUp,
               onMoveDown: widget.onMoveDown,
@@ -716,6 +722,8 @@ class _EditHeaderRow extends StatelessWidget {
     required this.canMoveDown,
     required this.campusCardStyle,
     required this.onCampusCardStyleChanged,
+    required this.widgetSize,
+    required this.onSizeChanged,
     required this.onConfigureQuickActions,
     required this.onMoveUp,
     required this.onMoveDown,
@@ -733,6 +741,8 @@ class _EditHeaderRow extends StatelessWidget {
   final bool canMoveDown;
   final HomeCampusCardStyle? campusCardStyle;
   final ValueChanged<HomeCampusCardStyle>? onCampusCardStyleChanged;
+  final HomeWidgetSize? widgetSize;
+  final ValueChanged<HomeWidgetSize>? onSizeChanged;
   final VoidCallback? onConfigureQuickActions;
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
@@ -799,6 +809,30 @@ class _EditHeaderRow extends StatelessWidget {
             onChanged: onCampusCardStyleChanged!,
           ),
         ],
+        if (id.sizes.isNotEmpty && widgetSize != null && onSizeChanged != null)
+          PopupMenuButton<HomeWidgetSize>(
+            key: ValueKey('home.widget-size-${id.key}'),
+            tooltip: '${meta.title}尺寸',
+            padding: EdgeInsets.zero,
+            initialValue: widgetSize,
+            onSelected: onSizeChanged,
+            itemBuilder: (context) => [
+              for (final size in id.sizes)
+                CheckedPopupMenuItem(
+                  key: ValueKey('home.widget-size-${id.key}-${size.name}'),
+                  value: size,
+                  checked: size == widgetSize,
+                  child: Text(size.label),
+                ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: TpTokens.space2,
+                vertical: TpTokens.space3,
+              ),
+              child: Text(widgetSize!.label, style: TpTypography.cardMeta(colors)),
+            ),
+          ),
         if (id == HomeWidgetId.quickActions &&
             onConfigureQuickActions != null) ...[
           const SizedBox(width: TpTokens.space1),

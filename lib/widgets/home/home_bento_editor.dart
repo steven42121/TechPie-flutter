@@ -26,6 +26,7 @@ class HomeBentoEditor extends StatefulWidget {
     required this.onRemove,
     required this.onEnterEditMode,
     this.onCampusCardStyleChanged,
+    this.onWidgetSizeChanged,
     this.onConfigureQuickActions,
     this.footerWidget,
   });
@@ -40,6 +41,7 @@ class HomeBentoEditor extends StatefulWidget {
   final void Function(HomeWidgetId id) onRemove;
   final VoidCallback onEnterEditMode;
   final ValueChanged<HomeCampusCardStyle>? onCampusCardStyleChanged;
+  final void Function(HomeWidgetId id, HomeWidgetSize size)? onWidgetSizeChanged;
   final VoidCallback? onConfigureQuickActions;
   final Widget? footerWidget;
 
@@ -91,6 +93,10 @@ class _HomeBentoEditorState extends State<HomeBentoEditor> {
         campusCardStyle:
             id == HomeWidgetId.campusCard ? widget.layout.campusCardStyle : null,
         onCampusCardStyleChanged: widget.onCampusCardStyleChanged,
+        widgetSize: widget.layout.sizeOf(id),
+        onSizeChanged: widget.onWidgetSizeChanged == null
+            ? null
+            : (size) => widget.onWidgetSizeChanged!(id, size),
         onConfigureQuickActions: widget.onConfigureQuickActions,
         onEnterEditMode: widget.onEnterEditMode,
         onMoveUp: () => widget.onMoveBy(id, -1),
