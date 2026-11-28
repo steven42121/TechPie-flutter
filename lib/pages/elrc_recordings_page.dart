@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/auth_service.dart';
@@ -10,7 +11,9 @@ import '../services/service_provider.dart';
 import '../services/third_party_auth_service.dart';
 import '../services/usage_telemetry.dart';
 import '../theme/theme.dart';
+import '../utils/platform.dart';
 import '../widgets/adaptive_button.dart';
+import '../widgets/adaptive_feedback.dart';
 import '../widgets/adaptive_navigation_scaffold.dart';
 import '../widgets/adaptive_page_navigation.dart';
 import '../widgets/app_shell/app_shell_metrics.dart';
@@ -73,10 +76,7 @@ class _ElrcRecordingsPageState extends State<ElrcRecordingsPage> with WidgetsBin
   String? _bindingOwner;
   bool _campusAttempted = false;
 
-  bool get _supported =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.iOS ||
-          defaultTargetPlatform == TargetPlatform.android);
+  bool get _supportsEmbeddedPlayback => isApplePlatform() || isAndroid();
 
   @override
   void didChangeDependencies() {
@@ -98,7 +98,7 @@ class _ElrcRecordingsPageState extends State<ElrcRecordingsPage> with WidgetsBin
     }
     _bindingOwner = _tpAuth!.campusWebSession.owner;
     _tpAuth!.addListener(_bindingChanged);
-    if (_supported) unawaited(_prepare());
+    if (_supportsEmbeddedPlayback) unawaited(_prepare());
   }
 
   bool get _authorized =>
@@ -139,7 +139,23 @@ class _ElrcRecordingsPageState extends State<ElrcRecordingsPage> with WidgetsBin
       _starting = true;
       _webVisible = false;
     });
-    if (_supported) unawaited(_prepare());
+    if (_supportsEmbeddedPlayback) unawaited(_prepare());
+  }
+
+  Future<void> _openInBrowser() async {
+    try {
+      if (await launchUrl(_reviewUri, mode: LaunchMode.externalApplication)) {
+        return;
+      }
+    } on Exception catch (error) {
+      _trace('could not launch the browser: ${error.runtimeType}');
+    }
+    if (!mounted) return;
+    showAdaptiveFeedback(
+      context: context,
+      message: '无法启动浏览器，请重试',
+      style: AdaptiveFeedbackStyle.error,
+    );
   }
 
   Future<void> _writeCampusSession(WebViewController controller) async {
@@ -674,12 +690,27 @@ class _ElrcRecordingsPageState extends State<ElrcRecordingsPage> with WidgetsBin
       );
 
   Widget _content(TpColors colors) {
-    if (!_supported) {
+    if (isDesktop() && !isMacOs()) {
       return _stateCard(
         colors,
-        icon: TpIcons.smartphone,
-        title: '请在 iPhone 或 Android 手机中观看录播',
-        subtitle: '课程录播依赖移动端嵌入式鉴权与视频播放组件。',
+        icon: TpIcons.recordings,
+        title: '在浏览器中观看录播',
+        subtitle: '通过学校的课程录播网站登录并播放课程。',
+        action: AdaptiveButton(
+          onPressed: _openInBrowser,
+          icon: TpIcons.externalLink,
+          sfSymbol: 'arrow.up.right.square',
+          label: '前往课程录播网站',
+          role: AdaptiveButtonRole.prominent,
+          height: 44,
+        ),
+      );
+    }
+    if (!_supportsEmbeddedPlayback) {
+      return _stateCard(
+        colors,
+        icon: TpIcons.recordings,
+        title: '当前平台暂不支持课程录播',
       );
     }
     if (_error != null && _courses == null && !_webVisible) {
@@ -1055,7 +1086,7 @@ class _ElrcRecordingsPageState extends State<ElrcRecordingsPage> with WidgetsBin
               ),
             ],
             trailingItems: [
-              if (_supported && !_webVisible && !_starting)
+              if (_supportsEmbeddedPlayback && !_webVisible && !_starting)
                 IosNativeNavigationBarItem(
                   id: 'refresh',
                   sfSymbol: 'arrow.clockwise',
@@ -1094,7 +1125,7 @@ class _ElrcRecordingsPageState extends State<ElrcRecordingsPage> with WidgetsBin
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
-              if (_supported && !_webVisible && !_starting)
+              if (_supportsEmbeddedPlayback && !_webVisible && !_starting)
                 IconButton(
                   tooltip: '刷新',
                   onPressed: _busy
@@ -1112,13 +1143,26 @@ class _ElrcRecordingsPageState extends State<ElrcRecordingsPage> with WidgetsBin
           bottom: false,
           child: Stack(
             children: [
-              Positioned.fill(child: _content(colors)),
-              if (_controller != null)
+              if (_controller case final controller?)
                 Positioned.fill(
+                  // macOS may suspend an offstage WKWebView during async fetches.
                   child: Offstage(
-                    offstage: !_webVisible,
-                    child: WebViewWidget(controller: _controller!),
+                    offstage: !_webVisible && !isMacOs(),
+                    child: ExcludeFocus(
+                      excluding: !_webVisible,
+                      child: IgnorePointer(
+                        ignoring: !_webVisible,
+                        child: ExcludeSemantics(
+                          excluding: !_webVisible,
+                          child: WebViewWidget(controller: controller),
+                        ),
+                      ),
+                    ),
                   ),
+                ),
+              if (!_webVisible || _controller == null)
+                Positioned.fill(
+                  child: ColoredBox(color: colors.canvas, child: _content(colors)),
                 ),
               if (_busy &&
                   (_courses != null || _lessons != null) &&
