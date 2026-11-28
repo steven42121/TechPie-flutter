@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:techpie/utils/platform.dart';
 
 import 'features/campus_card/app/app_providers.dart';
+import 'island_background_refresh.dart';
 import 'models/third_party_account.dart';
 import 'services/academic_certificate_service.dart';
 import 'services/assignment_service.dart';
@@ -59,6 +60,9 @@ import 'widgets/update_dialogs.dart';
 
 @pragma('vm:entry-point')
 Future<void> spendingBackgroundRefresh() => runSpendingBackgroundRefresh();
+
+@pragma('vm:entry-point')
+Future<void> islandTimelineRebuild() => runIslandTimelineRebuild();
 
 void main(List<String> args) async {
   // If this Flutter engine is a desktop_webview_window title bar (secondary

@@ -137,10 +137,12 @@ class _SettingsBodyState extends State<_SettingsBody> {
     final capability = _islandCapability;
     if (capability == null) return '显示当前课程、下一节课和即将到期的截止日期';
     if (!capability.notificationsEnabled) return '请允许 TechPie 发送通知';
-    return switch (capability.backend) {
+    return switch (capability.displayBackend) {
       'hyper_island' => '通过 HyperOS 超级岛显示',
       'live_update' => '通过 Android 实时通知显示',
-      _ => '通过普通常驻通知显示',
+      _ when capability.islandLikely && !capability.islandGranted =>
+        '尚未授权 HyperOS 超级岛，当前通过普通常驻通知显示',
+      _ => '通过普通常驻通知显示（非 HyperOS 超级岛）',
     };
   }
 
